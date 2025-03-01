@@ -1,11 +1,13 @@
 """
 """
 
+import math
+import random
 from typing import Optional
-from flax import nnx
+
 import jax
 import jax.numpy as jnp
-import random
+from flax import nnx
 
 random.seed(0)
 # Layer definitions
@@ -438,25 +440,11 @@ class PhaseShuffle2d(nnx.Module):
         return shuffled
 
 
-# def create_dct_matrix(n_mfcc: int, n_mels: int, norm: str = 'ortho') -> jnp.ndarray:
-#     """Creates a DCT-II matrix (same implementation as before)."""
-#     dct_matrix = jnp.zeros((n_mfcc, n_mels))
-#     for k in range(n_mfcc):
-#         for n in range(n_mels):
-#             dct_matrix = dct_matrix.at[k, n].set(jnp.cos(jnp.pi * k * (n + 0.5) / n_mels))
-
-#     if norm == 'ortho':
-#         row_0_scale = 1.0 / jnp.sqrt(n_mels)
-#         other_rows_scale = jnp.sqrt(2.0 / n_mels)
-#         dct_matrix = dct_matrix.at[0, :].set(row_0_scale * dct_matrix[0, :])
-#         dct_matrix = dct_matrix.at[1:, :].set(other_rows_scale * dct_matrix[1:, :])
-#     return dct_matrix
-
-
 def create_dct_matrix(n_mfcc: int, n_mels: int, norm: Optional[str] = None) -> jnp.ndarray:
-    """Creates a DCT transformation matrix.
+    """Creates a DCT transformation matrix (JAX version).
 
-    This function replicates torchaudio.functional.create_dct using JAX.
+    This function replicates torchaudio.functional.create_dct using JAX,
+    handling the normalization correctly.
 
     Args:
         n_mfcc: Number of MFCC coefficients.
@@ -464,17 +452,26 @@ def create_dct_matrix(n_mfcc: int, n_mels: int, norm: Optional[str] = None) -> j
         norm: Normalization mode ('ortho' or None).
 
     Returns:
-        A JAX array representing the DCT matrix.
+        A JAX array representing the DCT matrix (n_mfcc, n_mels).
     """
-    n = jnp.arange(n_mels)
-    k = jnp.arange(n_mfcc)[:, None]  # Add a new axis for broadcasting
-    dct_matrix = 2 * jnp.cos(jnp.pi * k * (2 * n + 1) / (2 * n_mels))
 
-    if norm == "ortho":
-        dct_matrix = dct_matrix.at[0].mul(1 / jnp.sqrt(2))
-        dct_matrix = dct_matrix * jnp.sqrt(2.0 / n_mels)  # Fixed scaling
+    if norm is not None and norm != "ortho":
+        raise ValueError('norm must be either "ortho" or None')
 
-    return dct_matrix
+    n = jnp.arange(float(n_mels))
+    k = jnp.expand_dims(
+        jnp.arange(float(n_mfcc)),
+        axis=1
+    )
+    dct_matrix = jnp.cos(math.pi / float(n_mels) * (n + 0.5) * k)
+
+    if norm is None:
+        dct_matrix = dct_matrix * 2.0
+    else:
+        dct_matrix = dct_matrix.at[0].multiply(1.0 / math.sqrt(2.0))
+        dct_matrix = dct_matrix * jnp.sqrt(2.0 / float(n_mels))
+
+    return dct_matrix.T
 
 
 class MFCC(nnx.Module):
@@ -494,8 +491,15 @@ class MFCC(nnx.Module):
         else:
             unsqueezed = False
 
-        # JAX uses jnp for array operations
-        mfcc = jnp.matmul(mel_specgram.transpose(0, 2, 1), self.dct_mat.value).transpose(0, 2, 1)
+        # Shape after unsqueeze: (batch, n_mels, time)
+        # Need to transpose to (batch, time, n_mels) for matmul
+        # DCT matrix shape should be (n_mels, n_mfcc)
+        # Result will be (batch, time, n_mfcc)
+        mel_transposed = jnp.transpose(mel_specgram, (0, 2, 1))
+        mfcc = jnp.matmul(mel_transposed, self.dct_mat.value)
+
+        # Transpose back to (batch, n_mfcc, time)
+        mfcc = jnp.transpose(mfcc, (0, 2, 1))
 
         if unsqueezed:
             mfcc = jnp.squeeze(mfcc, axis=0)

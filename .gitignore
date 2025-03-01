@@ -1,5 +1,4 @@
+.venv*
 LJSpeech-1.1*
-Checkpoint*
 __pycache__*
-*.pyc
-.DS_Store
+Checkpoint*

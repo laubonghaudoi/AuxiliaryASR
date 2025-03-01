@@ -1,0 +1,12 @@
+SoundFile
+torchaudio
+torch
+jiwer
+pyyaml
+click
+matplotlib
+g2p_en
+librosa
+pandas
+tensorboard
+jax[cuda12]
