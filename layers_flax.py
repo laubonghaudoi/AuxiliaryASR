@@ -33,7 +33,12 @@ class LinearNorm(nnx.Module):
 
 
 class ConvNorm(nnx.Module):
-    """Conv layer with normalization."""
+    """Conv layer with normalization.
+    
+    JAX's Conv expects [batch, spatial_dims, channels]
+    while PyTorch's Conv1d expects [batch, channels, spatial_dims]
+    So we need to transpose the input before and after the conv
+    """
 
     def __init__(
         self,
@@ -88,7 +93,7 @@ class CausualConv(nnx.Module):
 
         if padding is None:
             assert kernel_size % 2 == 1
-            padding = int(dilation * (kernel_size - 1) / 2) * 2
+            self.padding = int(dilation * (kernel_size - 1) / 2) * 2
         else:
             self.padding = padding * 2
 
@@ -125,8 +130,6 @@ def _get_activation(activ):
 
 
 # Block definitions
-
-
 class CausualBlock(nnx.Module):
     """Causual block."""
 
@@ -142,7 +145,7 @@ class CausualBlock(nnx.Module):
             CausualConv(
                 hidden_dim,
                 hidden_dim,
-                kernel_size=3,
+                kernel_size=3,  
                 padding=dilation,
                 dilation=dilation,
             ),
@@ -157,12 +160,12 @@ class CausualBlock(nnx.Module):
         ]
         return nnx.Sequential(layers)
 
-    def __init__(self, hidden_dim, n_conv=3, dropout_p=0.2, activ='lrelu'):
+    def __init__(self, hidden_dim, n_conv=3, dropout_p=0.2, activ='lrelu',rngs=nnx.Rngs(0)):
         super().__init__()
 
         self.blocks = [
             self._get_conv(
-                hidden_dim, dilation=3**i, activ=activ, dropout_p=dropout_p
+                hidden_dim, dilation=3**i, activ=activ, dropout_p=dropout_p, rngs=rngs
             )
             for i in range(n_conv)
         ]
@@ -227,7 +230,7 @@ class ConvBlock(nnx.Module):
 class LocationLayer(nnx.Module):
     """Location Layer."""
 
-    def __init__(self, attention_n_filters, attention_kernel_size, attention_dim):
+    def __init__(self, attention_n_filters, attention_kernel_size, attention_dim, rngs=nnx.Rngs(0)):
         super().__init__()
 
         self.location_conv = ConvNorm(
@@ -238,16 +241,19 @@ class LocationLayer(nnx.Module):
             strides=1,
             dilation=1,
             bias=False,
+            rngs=rngs,
         )
         self.location_dense = LinearNorm(
             attention_n_filters,
             attention_dim,
             bias=False,
+            rngs=rngs,
         )
 
     def __call__(self, attention_weights_cat):
+        # Convert from PyTorch format [batch, channels, spatial] to JAX format [batch, spatial, channels]
+        attention_weights_cat = jnp.transpose(attention_weights_cat, (0, 2, 1))
         processed_attention = self.location_conv(attention_weights_cat)
-        processed_attention = processed_attention.transpose(1, 2)
         processed_attention = self.location_dense(processed_attention)
         return processed_attention
 
@@ -418,6 +424,25 @@ class ForwardAttentionV2(nnx.Module):
 
         return attention_context, attention_weights, log_alpha_new
 
+class PhaseShuffle1d(nnx.Module):
+    def __init__(self, n=2):
+        super().__init__()
+
+        self.n = n
+        self.random = random.Random(1)
+
+    def __call__(self, x: jax.Array, move=None):
+        # x.size = (B, C, M, L)
+        if move is None:
+            move = self.random.randint(-self.n, self.n)
+
+        if move == 0:
+            return x
+        else:
+            left = x[:, :, :move]
+            right = x[:, :, move:]
+            shuffled = jnp.concatenate([right, left], dim=2)
+        return shuffled
 
 class PhaseShuffle2d(nnx.Module):
     def __init__(self, n=2):
@@ -438,69 +463,3 @@ class PhaseShuffle2d(nnx.Module):
             right = x[:, :, :, move:]
             shuffled = jnp.concatenate([right, left], dim=3)
         return shuffled
-
-
-def create_dct_matrix(n_mfcc: int, n_mels: int, norm: Optional[str] = None) -> jnp.ndarray:
-    """Creates a DCT transformation matrix (JAX version).
-
-    This function replicates torchaudio.functional.create_dct using JAX,
-    handling the normalization correctly.
-
-    Args:
-        n_mfcc: Number of MFCC coefficients.
-        n_mels: Number of mel filterbanks.
-        norm: Normalization mode ('ortho' or None).
-
-    Returns:
-        A JAX array representing the DCT matrix (n_mfcc, n_mels).
-    """
-
-    if norm is not None and norm != "ortho":
-        raise ValueError('norm must be either "ortho" or None')
-
-    n = jnp.arange(float(n_mels))
-    k = jnp.expand_dims(
-        jnp.arange(float(n_mfcc)),
-        axis=1
-    )
-    dct_matrix = jnp.cos(math.pi / float(n_mels) * (n + 0.5) * k)
-
-    if norm is None:
-        dct_matrix = dct_matrix * 2.0
-    else:
-        dct_matrix = dct_matrix.at[0].multiply(1.0 / math.sqrt(2.0))
-        dct_matrix = dct_matrix * jnp.sqrt(2.0 / float(n_mels))
-
-    return dct_matrix.T
-
-
-class MFCC(nnx.Module):
-    def __init__(self, n_mfcc=40, n_mels=80):  # Correct way of adding rngs
-        super().__init__()
-
-        self.n_mfcc = n_mfcc
-        self.n_mels = n_mels
-        self.norm = 'ortho'
-        dct_mat = create_dct_matrix(self.n_mfcc, self.n_mels, self.norm)
-        self.dct_mat = nnx.Variable(dct_mat, collection='params')  # Make it a Variable, you can put it into other collections e.g., 'buffers' if needed.
-
-    def __call__(self, mel_specgram):  # Use __call__ instead of forward
-        if len(mel_specgram.shape) == 2:
-            mel_specgram = jnp.expand_dims(mel_specgram, axis=0)
-            unsqueezed = True
-        else:
-            unsqueezed = False
-
-        # Shape after unsqueeze: (batch, n_mels, time)
-        # Need to transpose to (batch, time, n_mels) for matmul
-        # DCT matrix shape should be (n_mels, n_mfcc)
-        # Result will be (batch, time, n_mfcc)
-        mel_transposed = jnp.transpose(mel_specgram, (0, 2, 1))
-        mfcc = jnp.matmul(mel_transposed, self.dct_mat.value)
-
-        # Transpose back to (batch, n_mfcc, time)
-        mfcc = jnp.transpose(mfcc, (0, 2, 1))
-
-        if unsqueezed:
-            mfcc = jnp.squeeze(mfcc, axis=0)
-        return mfcc
