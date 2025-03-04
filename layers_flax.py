@@ -34,10 +34,13 @@ class LinearNorm(nnx.Module):
 
 class ConvNorm(nnx.Module):
     """Conv layer with normalization.
-    
+
     JAX's Conv expects [batch, spatial_dims, channels]
     while PyTorch's Conv1d expects [batch, channels, spatial_dims]
-    So we need to transpose the input before and after the conv
+    So we need to transpose the input before and after the conv.
+
+    Input: [batch, time, n_mfcc]
+    Output: [batch, time, channels]
     """
 
     def __init__(
@@ -71,12 +74,17 @@ class ConvNorm(nnx.Module):
             rngs=rngs,
         )
 
-    def __call__(self, x: jax.Array):
+    def __call__(self, x: jax.Array) -> jax.Array:
+        # Input: [batch, time, n_mfcc]
         return self.conv(x)
 
 
 class CausualConv(nnx.Module):
-    """Conv layer with normalization."""
+    """Conv layer with normalization.
+
+    Input: [Batch, Time, Channels]
+    Output: [Batch, Time, Channels]
+    """
 
     def __init__(
         self,
@@ -111,9 +119,9 @@ class CausualConv(nnx.Module):
             rngs=rngs,
         )
 
-    def __call__(self, x: jax.Array):
+    def __call__(self, x: jax.Array) -> jax.Array:
         x = self.conv(x)
-        x = x[:, :, : -self.padding]
+        x = x[:, :-self.padding, :]  # Trim the spatial dimension
         return x
 
 
@@ -145,7 +153,7 @@ class CausualBlock(nnx.Module):
             CausualConv(
                 hidden_dim,
                 hidden_dim,
-                kernel_size=3,  
+                kernel_size=3,
                 padding=dilation,
                 dilation=dilation,
             ),
@@ -160,7 +168,7 @@ class CausualBlock(nnx.Module):
         ]
         return nnx.Sequential(layers)
 
-    def __init__(self, hidden_dim, n_conv=3, dropout_p=0.2, activ='lrelu',rngs=nnx.Rngs(0)):
+    def __init__(self, hidden_dim, n_conv=3, dropout_p=0.2, activ='lrelu', rngs=nnx.Rngs(0)):
         super().__init__()
 
         self.blocks = [
@@ -424,6 +432,7 @@ class ForwardAttentionV2(nnx.Module):
 
         return attention_context, attention_weights, log_alpha_new
 
+
 class PhaseShuffle1d(nnx.Module):
     def __init__(self, n=2):
         super().__init__()
@@ -444,6 +453,7 @@ class PhaseShuffle1d(nnx.Module):
             shuffled = jnp.concatenate([right, left], dim=2)
         return shuffled
 
+
 class PhaseShuffle2d(nnx.Module):
     def __init__(self, n=2):
         super().__init__()
@@ -463,3 +473,8 @@ class PhaseShuffle2d(nnx.Module):
             right = x[:, :, :, move:]
             shuffled = jnp.concatenate([right, left], dim=3)
         return shuffled
+
+
+if __name__ == "__main__":
+    layer = ConvNorm(3, 64, kernel_size=5, strides=2, dilation=3)
+    x = jnp.rand((4, 100, 40))
