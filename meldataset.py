@@ -1,25 +1,24 @@
-#coding: utf-8
-
-import os
-import os.path as osp
-import time
-import random
-import numpy as np
-import random
-import soundfile as sf
-
-import torch
-from torch import nn
-import torch.nn.functional as F
-import torchaudio
-from torch.utils.data import DataLoader
-
-from g2p_en import G2p
+# coding: utf-8
 
 import logging
+import os.path as osp
+import random
+from typing import List
+
+import numpy as np
+import soundfile as sf
+import torch
+import torch.nn.functional as F
+import torchaudio
+from g2p_en import G2p
+from torch.utils.data import DataLoader
+
+from text_utils import TextCleaner
+from utils import get_data_path_list
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-from text_utils import TextCleaner
+
 np.random.seed(1)
 random.seed(1)
 DEFAULT_DICT_PATH = osp.join(osp.dirname(__file__), 'word_index_dict.txt')
@@ -35,24 +34,40 @@ MEL_PARAMS = {
     "hop_length": 300
 }
 
-class MelDataset(torch.utils.data.Dataset):
-    def __init__(self,
-                 data_list,
-                 dict_path=DEFAULT_DICT_PATH,
-                 sr=24000
-                ):
 
-        spect_params = SPECT_PARAMS
-        mel_params = MEL_PARAMS
+class MelDataset(torch.utils.data.Dataset):
+    """
+    Args:
+        data_list: list of strings, each string is formatted in `wave_path|text|speaker_id`.
+        dict_path (str): path to the dictionary file.
+        sr (int): sample rate of the wave files.
+
+    Returns:
+        wave_tensor (torch.FloatTensor): wave data tensor.
+        acoustic_feature (torch.FloatTensor): mel spectrogram tensor.
+        text_tensor (torch.LongTensor): text tensor.
+        speaker_id (int): speaker id.
+    """
+
+    def __init__(self,
+                 data_list: List[str],
+                 dict_path: str = DEFAULT_DICT_PATH,
+                 sr: int = 24000
+                 ):
+
+        # spect_params = SPECT_PARAMS
+        # mel_params = MEL_PARAMS
 
         _data_list = [l[:-1].split('|') for l in data_list]
+
+        # `self.data_list` is a list of [wave_path, text, speaker_id]
         self.data_list = [data if len(data) == 3 else (*data, 0) for data in _data_list]
         self.text_cleaner = TextCleaner(dict_path)
         self.sr = sr
 
         self.to_melspec = torchaudio.transforms.MelSpectrogram(**MEL_PARAMS)
         self.mean, self.std = -4, 4
-        
+
         self.g2p = G2p()
 
     def __len__(self):
@@ -64,12 +79,12 @@ class MelDataset(torch.utils.data.Dataset):
         wave_tensor = torch.from_numpy(wave).float()
         mel_tensor = self.to_melspec(wave_tensor)
 
-        if (text_tensor.size(0)+1) >= (mel_tensor.size(1) // 3):
+        if (text_tensor.size(0) + 1) >= (mel_tensor.size(1) // 3):
             mel_tensor = F.interpolate(
-                mel_tensor.unsqueeze(0), size=(text_tensor.size(0)+1)*3, align_corners=False,
+                mel_tensor.unsqueeze(0), size=(text_tensor.size(0) + 1) * 3, align_corners=False,
                 mode='linear').squeeze(0)
 
-        acoustic_feature = (torch.log(1e-5 + mel_tensor) - self.mean)/self.std
+        acoustic_feature = (torch.log(1e-5 + mel_tensor) - self.mean) / self.std
 
         length_feature = acoustic_feature.size(1)
         acoustic_feature = acoustic_feature[:, :(length_feature - length_feature % 2)]
@@ -87,14 +102,12 @@ class MelDataset(torch.utils.data.Dataset):
             ps.remove("'")
         text = self.text_cleaner(ps)
         blank_index = self.text_cleaner.word_index_dictionary[" "]
-        text.insert(0, blank_index) # add a blank at the beginning (silence)
-        text.append(blank_index) # add a blank at the end (silence)
-        
+        text.insert(0, blank_index)  # add a blank at the beginning (silence)
+        text.append(blank_index)  # add a blank at the end (silence)
+
         text = torch.LongTensor(text)
 
         return wave, text, speaker_id
-
-
 
 
 class Collater(object):
@@ -132,14 +145,13 @@ class Collater(object):
             input_lengths[bid] = text_size
             output_lengths[bid] = mel_size
             paths[bid] = path
-            assert(text_size < (mel_size//2))
+            assert (text_size < (mel_size // 2))
 
         if self.return_wave:
             waves = [b[0] for b in batch]
             return texts, input_lengths, mels, output_lengths, paths, waves
 
         return texts, input_lengths, mels, output_lengths
-
 
 
 def build_dataloader(path_list,
@@ -161,3 +173,11 @@ def build_dataloader(path_list,
                              pin_memory=(device != 'cpu'))
 
     return data_loader
+
+
+if __name__ == "__main__":
+    train_list, val_list = get_data_path_list("Data/train_list.txt", "Data/val_list.txt")
+    mel_dataset = build_dataloader(train_list, batch_size=1)
+    for batch in mel_dataset:
+        print(batch)
+        break
