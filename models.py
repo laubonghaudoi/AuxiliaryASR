@@ -3,14 +3,7 @@ import math
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.nn import TransformerEncoder
-
 from layers import MFCC, Attention, ConvBlock, ConvNorm, LinearNorm
-
-
-def build_model(model_params={}, model_type='asr'):
-    model = ASRCNN(**model_params)
-    return model
 
 
 class ASRCNN(nn.Module):
@@ -79,12 +72,12 @@ class ASRCNN(nn.Module):
 
     def forward(self, x, src_key_padding_mask=None, text_input=None):
         """Perform a forward pass.
-        
+
         Parameters:
             x (torch.Tensor): Input mel spectrogram tensor of shape (B, input_dim, T).
             src_key_padding_mask (torch.Tensor, optional): Padding mask for the input sequence.
             text_input (torch.Tensor, optional): Tokenized text input of shape (B, T_text) for s2s decoding.
-        
+
         Returns:
             If text_input is None:
                 torch.Tensor: CTC logits of shape (B, T', n_token).
@@ -166,7 +159,7 @@ class ASRS2S(nn.Module):
             n_location_filters (int): Number of filters for location-based attention.
             location_kernel_size (int): Kernel size for the location-based attention convolution.
             n_token (int): Number of tokens (vocabulary size) including special tokens.
-        
+
         Returns:
             None
 
@@ -200,7 +193,7 @@ class ASRS2S(nn.Module):
         Parameters:
             memory (torch.Tensor): Encoder outputs of shape (B, L, H), where B is batch size, L is sequence length, and H is hidden dimension.
             mask (torch.Tensor): Boolean mask of shape (B, L) indicating padded positions.
-        
+
         Returns:
             None
         """
