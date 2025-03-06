@@ -41,8 +41,20 @@ class ASRCNN(nn.Module):
                  token_embedding_dim=256,
 
                  ):
-        """
+        """Initialize ASRCNN model.
 
+        Parameters:
+            input_dim (int): Input dimension of mel spectrogram. Expected input shape: (B, input_dim, T).
+            hidden_dim (int): Hidden dimension size for convolutional layers.
+            n_token (int): Number of output tokens.
+            n_layers (int): Number of convolutional layers.
+            token_embedding_dim (int): Dimension of token embeddings for the s2s decoder.
+
+        Returns:
+            None
+
+        Note:
+            This model converts input audio (mel spectrogram) to feature representations for both CTC and s2s decoding.
         """
         super().__init__()
 
@@ -66,6 +78,22 @@ class ASRCNN(nn.Module):
             n_token=n_token)
 
     def forward(self, x, src_key_padding_mask=None, text_input=None):
+        """Perform a forward pass.
+        
+        Parameters:
+            x (torch.Tensor): Input mel spectrogram tensor of shape (B, input_dim, T).
+            src_key_padding_mask (torch.Tensor, optional): Padding mask for the input sequence.
+            text_input (torch.Tensor, optional): Tokenized text input of shape (B, T_text) for s2s decoding.
+        
+        Returns:
+            If text_input is None:
+                torch.Tensor: CTC logits of shape (B, T', n_token).
+            Else:
+                tuple: (ctc_logit, s2s_logit, s2s_attn) where:
+                    ctc_logit (torch.Tensor): CTC logits of shape (B, T', n_token).
+                    s2s_logit (torch.Tensor): S2S logits of shape (B, T_text+1, n_token).
+                    s2s_attn (torch.Tensor): Attention weights of shape (B, T_text+1, T').
+        """
         x = self.to_mfcc(x)
         x = self.init_cnn(x)
         x = self.cnns(x)
@@ -80,6 +108,14 @@ class ASRCNN(nn.Module):
             return ctc_logit
 
     def get_feature(self, x):
+        """Extract intermediate features from the input.
+
+        Parameters:
+            x (torch.Tensor): Input mel spectrogram tensor of shape (B, input_dim, T).
+
+        Returns:
+            torch.Tensor: Feature representation from the CNN layers.
+        """
         x = self.to_mfcc(x)
         x = self.init_cnn(x)
         x = self.cnns(x)
@@ -88,17 +124,27 @@ class ASRCNN(nn.Module):
         return x
 
     def length_to_mask(self, lengths):
+        """Generate a boolean mask from sequence lengths.
+
+        Parameters:
+            lengths (torch.Tensor): A tensor of shape (B,) containing the lengths of each sequence in the batch.
+
+        Returns:
+            torch.BoolTensor: A mask tensor of shape (B, T) where T is the maximum sequence length.
+        """
         mask = torch.arange(lengths.max()).unsqueeze(0).expand(lengths.shape[0], -1).type_as(lengths)
         mask = torch.gt(mask + 1, lengths.unsqueeze(1)).to(lengths.device)
         return mask
 
     def get_future_mask(self, out_length, unmask_future_steps=0):
-        """
-        Args:
-            out_length (int): returned mask shape is (out_length, out_length).
-            unmask_futre_steps (int): unmasking future step size.
-        Return:
-            mask (torch.BoolTensor): mask future timesteps mask[i, j] = True if i > j + unmask_future_steps else False
+        """Generate an upper triangular future mask for sequence data.
+
+        Parameters:
+            out_length (int): The length of the output sequence (T). The returned mask will have shape (T, T).
+            unmask_future_steps (int): Number of future steps to leave unmasked.
+
+        Returns:
+            torch.BoolTensor: A mask of shape (out_length, out_length) where mask[i, j] is True if i > j + unmask_future_steps, otherwise False.
         """
         index_tensor = torch.arange(out_length).unsqueeze(0).expand(out_length, -1)
         mask = torch.gt(index_tensor, index_tensor.T + unmask_future_steps)
@@ -112,6 +158,21 @@ class ASRS2S(nn.Module):
                  n_location_filters=32,
                  location_kernel_size=63,
                  n_token=40):
+        """Initialize ASRS2S sequence-to-sequence decoder.
+
+        Parameters:
+            embedding_dim (int): Dimension of token embeddings.
+            hidden_dim (int): Hidden dimension size for the decoder.
+            n_location_filters (int): Number of filters for location-based attention.
+            location_kernel_size (int): Kernel size for the location-based attention convolution.
+            n_token (int): Number of tokens (vocabulary size) including special tokens.
+        
+        Returns:
+            None
+
+        Note:
+            The decoder uses an LSTM cell and an attention mechanism to generate token logits and attention alignments.
+        """
         super(ASRS2S, self).__init__()
         self.embedding = nn.Embedding(n_token, embedding_dim)
         val_range = math.sqrt(6 / hidden_dim)
@@ -134,8 +195,14 @@ class ASRS2S(nn.Module):
         self.eos = 2
 
     def initialize_decoder_states(self, memory, mask):
-        """
-        moemory.shape = (B, L, H) = (Batchsize, Maxtimestep, Hiddendim)
+        """Initialize decoder states for the sequence-to-sequence module.
+
+        Parameters:
+            memory (torch.Tensor): Encoder outputs of shape (B, L, H), where B is batch size, L is sequence length, and H is hidden dimension.
+            mask (torch.Tensor): Boolean mask of shape (B, L) indicating padded positions.
+        
+        Returns:
+            None
         """
         B, L, H = memory.shape
         self.decoder_hidden = torch.zeros((B, self.decoder_rnn_dim)).type_as(memory)
@@ -150,10 +217,19 @@ class ASRS2S(nn.Module):
         self.random_mask = 0.1
 
     def forward(self, memory, memory_mask, text_input):
-        """
-        moemory.shape = (B, L, H) = (Batchsize, Maxtimestep, Hiddendim)
-        moemory_mask.shape = (B, L, )
-        texts_input.shape = (B, T)
+        """Perform a forward decoding pass for the sequence-to-sequence module.
+
+        Parameters:
+            memory (torch.Tensor): Encoder outputs of shape (B, L, H), where B is the batch size,
+                L is the sequence length, and H is the hidden dimension.
+            memory_mask (torch.Tensor): Boolean mask of shape (B, L) indicating padded positions.
+            text_input (torch.Tensor): Tokenized text input of shape (B, T) to guide decoding.
+
+        Returns:
+            tuple: (hidden_outputs, logit_outputs, alignments) where:
+                hidden_outputs (torch.Tensor): Decoder hidden states of shape (B, T_out, hidden_dim).
+                logit_outputs (torch.Tensor): Token logits of shape (B, T_out, n_token).
+                alignments (torch.Tensor): Attention weights of shape (B, T_out, L).
         """
         self.initialize_decoder_states(memory, memory_mask)
         # text random mask
@@ -181,7 +257,17 @@ class ASRS2S(nn.Module):
         return hidden_outputs, logit_outputs, alignments
 
     def decode(self, decoder_input):
+        """Decode a single time step using the current decoder state and input.
 
+        Parameters:
+            decoder_input (torch.Tensor): Input tensor for the current time step, shape (B, embedding_dim).
+
+        Returns:
+            tuple: (hidden, logit, attention_weights) where:
+                hidden (torch.Tensor): Updated hidden state, shape (B, decoder_rnn_dim).
+                logit (torch.Tensor): Token logits, shape (B, n_token).
+                attention_weights (torch.Tensor): Attention weights, shape (B, L).
+        """
         cell_input = torch.cat((decoder_input, self.attention_context), -1)
         self.decoder_hidden, self.decoder_cell = self.decoder_rnn(
             cell_input,
@@ -209,7 +295,19 @@ class ASRS2S(nn.Module):
         return hidden, logit, self.attention_weights
 
     def parse_decoder_outputs(self, hidden, logit, alignments):
+        """Stack and format decoder outputs from a list of time steps.
 
+        Parameters:
+            hidden (list of torch.Tensor): List of hidden state tensors for each time step, each of shape (B, hidden_dim).
+            logit (list of torch.Tensor): List of logit tensors for each time step, each of shape (B, n_token).
+            alignments (list of torch.Tensor): List of attention weight tensors for each time step, each of shape (B, L).
+
+        Returns:
+            tuple: (hidden, logit, alignments) where:
+                hidden (torch.Tensor): Tensor of shape (B, T_out+1, hidden_dim).
+                logit (torch.Tensor): Tensor of shape (B, T_out+1, n_token).
+                alignments (torch.Tensor): Tensor of shape (B, T_out+1, L).
+        """
         # -> [B, T_out + 1, max_time]
         alignments = torch.stack(alignments).transpose(0, 1)
         # [T_out + 1, B, n_symbols] -> [B, T_out + 1,  n_symbols]
