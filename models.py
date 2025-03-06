@@ -145,6 +145,15 @@ class ASRCNN(nn.Module):
 
 
 class ASRS2S(nn.Module):
+    """
+    ASRS2S is an attention-based sequence-to-sequence decoder for automatic speech recognition.
+    It converts encoded audio features into token sequences using an LSTM decoder and an attention mechanism.
+    Input:
+      - memory: Encoder outputs of shape (B, L, H)
+      - text_input: Tokenized text input of shape (B, T)
+    Output:
+      - A tuple containing decoder hidden states, token logits, and attention alignments.
+    """
     def __init__(self,
                  embedding_dim=256,
                  hidden_dim=512,
