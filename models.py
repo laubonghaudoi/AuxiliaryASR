@@ -32,7 +32,6 @@ class ASRCNN(nn.Module):
                  n_token=35,
                  n_layers=6,
                  token_embedding_dim=256,
-
                  ):
         """Initialize ASRCNN model.
 
@@ -42,9 +41,6 @@ class ASRCNN(nn.Module):
             n_token (int): Number of output tokens.
             n_layers (int): Number of convolutional layers.
             token_embedding_dim (int): Dimension of token embeddings for the s2s decoder.
-
-        Returns:
-            None
 
         Note:
             This model converts input audio (mel spectrogram) to feature representations for both CTC and s2s decoding.
@@ -154,6 +150,7 @@ class ASRS2S(nn.Module):
     Output:
       - A tuple containing decoder hidden states, token logits, and attention alignments.
     """
+
     def __init__(self,
                  embedding_dim=256,
                  hidden_dim=512,
@@ -168,9 +165,6 @@ class ASRS2S(nn.Module):
             n_location_filters (int): Number of filters for location-based attention.
             location_kernel_size (int): Kernel size for the location-based attention convolution.
             n_token (int): Number of tokens (vocabulary size) including special tokens.
-
-        Returns:
-            None
 
         Note:
             The decoder uses an LSTM cell and an attention mechanism to generate token logits and attention alignments.

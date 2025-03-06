@@ -4,14 +4,14 @@ import sys
 import time
 from collections import defaultdict
 
+import jiwer
 import matplotlib
+import matplotlib.pylab as plt
 import numpy as np
 import soundfile as sf
 import torch
 from torch import nn
-import jiwer
 
-import matplotlib.pylab as plt
 
 def calc_wer(target, pred, ignore_indexes=[0]):
     target_chars = drop_duplicated(list(filter(lambda x: x not in ignore_indexes, map(str, list(target)))))
@@ -21,6 +21,7 @@ def calc_wer(target, pred, ignore_indexes=[0]):
     error = jiwer.wer(target_str, pred_str)
     return error
 
+
 def drop_duplicated(chars):
     ret_chars = [chars[0]]
     for prev, curr in zip(chars[:-1], chars[1:]):
@@ -28,12 +29,14 @@ def drop_duplicated(chars):
             ret_chars.append(curr)
     return ret_chars
 
+
 def build_criterion(critic_params={}):
     criterion = {
         "ce": nn.CrossEntropyLoss(ignore_index=-1),
         "ctc": torch.nn.CTCLoss(**critic_params.get('ctc', {})),
     }
     return criterion
+
 
 def get_data_path_list(train_path=None, val_path=None):
     if train_path is None:

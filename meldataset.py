@@ -165,7 +165,7 @@ class Collater(object):
 
     def __call__(self, batch):
         batch_size = len(batch)
-        print(batch)
+
         # sort by mel length
         lengths = [b[1].shape[1] for b in batch]
 
