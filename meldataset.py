@@ -66,7 +66,7 @@ class MelDataset(torch.utils.data.Dataset):
         self.to_melspec = torchaudio.transforms.MelSpectrogram(**MEL_PARAMS)
         self.mean, self.std = -4, 4
 
-        self.g2p = G2p()
+        self.g2p = None
 
     def __len__(self):
         return len(self.data_list)
@@ -131,6 +131,8 @@ class MelDataset(torch.utils.data.Dataset):
         wave, sr = sf.read(wave_path)
 
         # phonemize the text
+        if self.g2p is None:
+            self.g2p = G2p()
         phonemes = self.g2p(text.replace('-', ' '))
         if "'" in phonemes:
             phonemes.remove("'")
