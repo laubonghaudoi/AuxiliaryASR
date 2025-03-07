@@ -12,8 +12,8 @@ import torch.nn.functional as F
 import torchaudio
 from g2p_en import G2p
 from torch.utils.data import DataLoader
+import pandas as pd
 
-from text_utils import TextCleaner
 from utils import get_data_path_list
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,6 @@ logger.setLevel(logging.DEBUG)
 
 np.random.seed(1)
 random.seed(1)
-DEFAULT_DICT_PATH = osp.join(osp.dirname(__file__), 'word_index_dict.txt')
 SPECT_PARAMS = {
     "n_fft": 2048,
     "win_length": 1200,
@@ -33,6 +32,27 @@ MEL_PARAMS = {
     "win_length": 1200,
     "hop_length": 300
 }
+
+class PhonemeIndexer:
+    def __init__(self, language):
+        self.word_index_dictionary = self.load_dictionary(
+            osp.join(
+                osp.dirname(__file__), 
+                f'{language}_phoneme_index.txt'))
+
+    def __call__(self, text):
+        indexes = []
+        for char in text:
+            try:
+                indexes.append(self.word_index_dictionary[char])
+            except KeyError:
+                print(f"Phoeneme index not exist for {char}")
+        return indexes
+
+    def load_dictionary(self, path):
+        csv = pd.read_csv(path, header=None).values
+        word_index_dict = {word: index for word, index in csv}
+        return word_index_dict
 
 
 class MelDataset(torch.utils.data.Dataset):
@@ -52,7 +72,7 @@ class MelDataset(torch.utils.data.Dataset):
 
     def __init__(self,
                  data_list: List[str],
-                 dict_path: str = DEFAULT_DICT_PATH,
+                 language: str = 'en',
                  sr: int = 24000
                  ):
 
@@ -60,12 +80,13 @@ class MelDataset(torch.utils.data.Dataset):
 
         # list of [wave_path, text, speaker_id]
         self.data_list = [data if len(data) == 3 else (*data, 0) for data in _data_list]
-        self.text_cleaner = TextCleaner(dict_path)
+        self.phoneme_indexer = PhonemeIndexer(language)
         self.sr = sr
 
         self.to_melspec = torchaudio.transforms.MelSpectrogram(**MEL_PARAMS)
         self.mean, self.std = -4, 4
 
+        self.language = language
         self.g2p = None
 
     def __len__(self):
@@ -130,19 +151,30 @@ class MelDataset(torch.utils.data.Dataset):
         # get wave form
         wave, sr = sf.read(wave_path)
 
+        if self.language == 'en':
+            phoneme_indices = self._get_en_phoneme_index(text)
+        elif self.language == 'yue':
+            phoneme_indices = self._get_yue_phoneme_index(text)
+
+        return wave, phoneme_indices, speaker_id
+    
+    def _get_en_phoneme_index(self, text):
         # phonemize the text
         if self.g2p is None:
             self.g2p = G2p()
         phonemes = self.g2p(text.replace('-', ' '))
         if "'" in phonemes:
             phonemes.remove("'")
-        phoneme_indices = self.text_cleaner(phonemes)
+        phoneme_indices = self.phoneme_indexer(phonemes)
 
-        blank_index = self.text_cleaner.word_index_dictionary[" "]
+        blank_index = self.phoneme_indexer.word_index_dictionary[" "]
         phoneme_indices.insert(0, blank_index)  # add a blank at the beginning (silence)
         phoneme_indices.append(blank_index)  # add a blank at the end (silence)
-
-        return wave, phoneme_indices, speaker_id
+        
+        return phoneme_indices
+    
+    def _get_yue_phoneme_index(self, text):
+        raise NotImplementedError
 
 
 class Collater(object):
@@ -220,10 +252,11 @@ def build_dataloader(path_list,
                      batch_size=4,
                      num_workers=1,
                      device='cpu',
+                     language='en',
                      collate_config={},
                      dataset_config={}):
 
-    dataset = MelDataset(path_list, **dataset_config)
+    dataset = MelDataset(path_list, language, **dataset_config)
     collate_fn = Collater(**collate_config)
     data_loader = DataLoader(dataset,
                              batch_size=batch_size,

@@ -5,6 +5,7 @@ import shutil
 from logging import StreamHandler
 
 import click
+from models import ASRCNN
 import torch
 import yaml
 from torch.utils.tensorboard import SummaryWriter
@@ -77,7 +78,7 @@ def main(config_path):
     optimizer, scheduler = build_optimizer(
         {"params": model.parameters(), "optimizer_params": {}, "scheduler_params": scheduler_params})
 
-    blank_index = train_dataloader.dataset.text_cleaner.word_index_dictionary[" "]  # get blank index
+    blank_index = train_dataloader.dataset.phoneme_indexer.word_index_dictionary[" "]  # get blank index
 
     criterion = build_criterion(critic_params={
         'ctc': {'blank': blank_index},
