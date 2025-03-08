@@ -10,3 +10,4 @@ librosa
 pandas
 tensorboard
 jax[cuda12]
+ToJyutping

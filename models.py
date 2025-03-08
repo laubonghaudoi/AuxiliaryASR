@@ -29,7 +29,7 @@ class ASRCNN(nn.Module):
     def __init__(self,
                  input_dim=80,
                  hidden_dim=256,
-                 n_token=35,
+                 n_token=1742,  # Updated for Cantonese phoneme dictionary size
                  n_layers=6,
                  token_embedding_dim=256,
                  ):
@@ -156,7 +156,7 @@ class ASRS2S(nn.Module):
                  hidden_dim=512,
                  n_location_filters=32,
                  location_kernel_size=63,
-                 n_token=40):
+                 n_token=1742):  # Updated for Cantonese phoneme dictionary size
         """Initialize ASRS2S sequence-to-sequence decoder.
 
         Parameters:

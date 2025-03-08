@@ -49,22 +49,26 @@ def main(config_path):
     save_freq = config.get('save_freq', 20)
     train_path = config.get('train_data', None)
     val_path = config.get('val_data', None)
+    language = config.get('language', 'yue')
 
     train_list, val_list = get_data_path_list(train_path, val_path)
 
     train_dataloader = build_dataloader(train_list,
+                                        language,
                                         batch_size=batch_size,
                                         num_workers=8,
                                         dataset_config=config.get('dataset_params', {}),
                                         device=device)
 
     val_dataloader = build_dataloader(val_list,
+                                      language,
                                       batch_size=batch_size,
                                       validation=True,
                                       num_workers=2,
                                       device=device,
                                       dataset_config=config.get('dataset_params', {}))
 
+    config['model_params']['n_token'] = len(train_dataloader.dataset.phoneme_indexer.word_index_dictionary)
     model = ASRCNN(**config['model_params'] or {})
 
     scheduler_params = {

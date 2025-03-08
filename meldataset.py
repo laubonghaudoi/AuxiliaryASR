@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 import torchaudio
 from g2p_en import G2p
+from ToJyutping import get_jyutping_list
 from torch.utils.data import DataLoader
 import pandas as pd
 
@@ -33,16 +34,25 @@ MEL_PARAMS = {
     "hop_length": 300
 }
 
+
 class PhonemeIndexer:
+    """
+    Args:
+        language (str): language of the phoneme index file.
+
+    Returns:
+        indexes (List[int]): list of phoneme indexes.
+    """
+
     def __init__(self, language):
         self.word_index_dictionary = self.load_dictionary(
             osp.join(
-                osp.dirname(__file__), 
+                osp.dirname(__file__),
                 f'{language}_phoneme_index.txt'))
 
-    def __call__(self, text):
+    def __call__(self, phonemes):
         indexes = []
-        for char in text:
+        for char in phonemes:
             try:
                 indexes.append(self.word_index_dictionary[char])
             except KeyError:
@@ -51,7 +61,8 @@ class PhonemeIndexer:
 
     def load_dictionary(self, path):
         csv = pd.read_csv(path, header=None).values
-        word_index_dict = {word: index for word, index in csv}
+        words = [row[0] for row in csv]
+        word_index_dict = {word: i for i, word in enumerate(words)}
         return word_index_dict
 
 
@@ -94,7 +105,7 @@ class MelDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         """
-        If the phonemes is longer than 1/3 of the time-dimensio of the mel
+        If the phonemes is longer than 1/3 of the time-dimension of the mel
         spectrogram. If it is, it uses interpolation to increase the size
         of the mel spectrogram to match the length of the text. The intuition
         behind this is that the phonemes should be longer than the mel spectrogram
@@ -135,7 +146,7 @@ class MelDataset(torch.utils.data.Dataset):
 
     def _load_raw(self, data: List[str]):
         """
-        Given a list of waveform file path, text and speaker id, 
+        Given a list of waveform file path, text and speaker id,
         return the waveform tensor, text tensor and speaker id.
 
         Args:
@@ -149,15 +160,20 @@ class MelDataset(torch.utils.data.Dataset):
         wave_path, text, speaker_id = data
         speaker_id = int(speaker_id)
         # get wave form
-        wave, sr = sf.read(wave_path)
+        try:
+            wave, sr = sf.read(wave_path)
+        except Exception as e:
+            raise RuntimeError(f"Error reading file {wave_path}: {e}")
 
         if self.language == 'en':
             phoneme_indices = self._get_en_phoneme_index(text)
         elif self.language == 'yue':
             phoneme_indices = self._get_yue_phoneme_index(text)
+        else:
+            raise NotImplementedError(f"Language {self.language} not supported")
 
         return wave, phoneme_indices, speaker_id
-    
+
     def _get_en_phoneme_index(self, text):
         # phonemize the text
         if self.g2p is None:
@@ -170,17 +186,27 @@ class MelDataset(torch.utils.data.Dataset):
         blank_index = self.phoneme_indexer.word_index_dictionary[" "]
         phoneme_indices.insert(0, blank_index)  # add a blank at the beginning (silence)
         phoneme_indices.append(blank_index)  # add a blank at the end (silence)
-        
+
         return phoneme_indices
-    
+
     def _get_yue_phoneme_index(self, text):
-        raise NotImplementedError
+        jyutping = get_jyutping_list(text)
+        phonemes = []
+        for char in jyutping:
+            if char[1]:
+                # jyutping is not None, it is a valid character
+                phonemes.append(char[1])
+            else:
+                # jyutping is None, it is a punctuation or special character
+                phonemes.append(char[0])
+        phoneme_indices = self.phoneme_indexer(phonemes)
+        return phoneme_indices
 
 
 class Collater(object):
     """
     Args:
-        return_wave (bool): if true, will return the wave data along with spectrogram. 
+        return_wave (bool): if true, will return the wave data along with spectrogram.
 
     Returns:
         phonemes (torch.LongTensor): phoneme tensor.
@@ -248,11 +274,11 @@ class Collater(object):
 
 
 def build_dataloader(path_list,
+                     language,
                      validation=False,
                      batch_size=4,
                      num_workers=1,
                      device='cpu',
-                     language='en',
                      collate_config={},
                      dataset_config={}):
 
@@ -270,7 +296,10 @@ def build_dataloader(path_list,
 
 
 if __name__ == "__main__":
-    train_list, val_list = get_data_path_list("Data/train_list.txt", "Data/val_list.txt")
-    mel_dataset = build_dataloader(train_list, batch_size=1)
+    # train_list, val_list = get_data_path_list("Data/train_list.txt", "Data/val_list.txt")
+    # mel_dataset = build_dataloader(train_list, 'en', batch_size=1)
+
+    train_list, val_list = get_data_path_list("Data/mouzaakdung.txt", "Data/mouzaakdung.txt")
+    mel_dataset = build_dataloader(train_list, 'yue', batch_size=1)
     for batch in mel_dataset:
         pass

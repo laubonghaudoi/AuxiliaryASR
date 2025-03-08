@@ -4,9 +4,9 @@ device: "cpu"
 epochs: 200
 batch_size: 64
 pretrained_model: ""
-train_data: "Data/train_list.txt"
-val_data: "Data/val_list.txt"
-language: "en"
+train_data: "Data/mouzaakdung.txt"
+val_data: "Data/mouzaakdung.txt"
+language: "yue"
 
 preprocess_parasm:
   sr: 24000
