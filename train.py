@@ -67,7 +67,7 @@ def main(config_path):
                                       num_workers=2,
                                       device=device,
                                       dataset_config=config.get('dataset_params', {}))
-
+    # make sure the model output vocabulary size is the same as the number of phonemes
     config['model_params']['n_token'] = len(train_dataloader.dataset.phoneme_indexer.word_index_dictionary)
     model = ASRCNN(**config['model_params'] or {})
 

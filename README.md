@@ -4,21 +4,11 @@ This repo contains the training code for Phoneme-level ASR for Voice Conversion 
 
 ## Pre-requisites
 
-1. Python >= 3.7
-2. Clone this repository:
-
 ```bash
-git clone https://github.com/yl4579/AuxiliaryASR.git
-cd AuxiliaryASR
+pip install -r requirements.txt
 ```
 
-3. Install python requirements:
-
-```bash
-pip install SoundFile torchaudio torch jiwer pyyaml click matplotlib g2p_en librosa
-```
-
-4. Prepare your own dataset and put the `train_list.txt` and `val_list.txt` in the `Data` folder (see Training section for more details).
+Prepare your own dataset and put the `train_list.txt` and `val_list.txt` in the `Data` folder (see Training section for more details).
 
 ## Training
 
