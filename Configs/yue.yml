@@ -2,7 +2,7 @@ log_dir: "Checkpoint"
 save_freq: 10
 device: "cuda"
 epochs: 200
-batch_size: 32
+batch_size: 16
 pretrained_model: ""
 train_data: "Data/yue_train.txt"
 val_data: "Data/yue_val.txt"
